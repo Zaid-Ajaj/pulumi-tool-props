@@ -1,0 +1,7 @@
+{
+    "schema": "./github-schema.json",
+    "queries": "./graphql-queries",
+    "project": "Github",
+    "output": "./src/Github",
+    "target": "fsharp"
+}

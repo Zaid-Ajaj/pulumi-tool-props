@@ -13,6 +13,8 @@ open Newtonsoft.Json.Linq
 open Shared
 open System.Threading.Tasks
 open Microsoft.Extensions.Logging
+open System.Net.Http
+open System.Net.Http.Headers
 
 let capitalize (input: string) =
     match input with
@@ -70,8 +72,55 @@ let getPulumiVersion() = task {
     return output.StandardOutput
 }
 
+let acquireGithubToken() = task {
+    let tokenFromEnv = Environment.GetEnvironmentVariable "GITHUB_TOKEN"
+    if notEmpty tokenFromEnv then
+        return Ok tokenFromEnv
+    else
+        try
+            let! tokenFromCli =
+                Cli.Wrap("gh")
+                    .WithArguments("auth token")
+                    .WithValidation(CommandResultValidation.None)
+                    .ExecuteBufferedAsync()
+
+            return Ok (tokenFromCli.StandardOutput.Trim())
+        with
+        | error ->
+            return Error $"Error while obtaining GitHub token. Either GITHUB_TOKEN environment variable was not set or 'gh auth login' has failed: {error.Message}"
+}
+
+let httpClient = new HttpClient(BaseAddress = Uri "https://api.github.com/graphql")
+httpClient.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("PulumiTool", "0.1.0"))
+
+let githubClient() = task {
+    let! tokenResult = acquireGithubToken()
+    match tokenResult with
+    | Ok token ->
+        httpClient.DefaultRequestHeaders.Authorization <- new AuthenticationHeaderValue("Bearer", token)
+        let graphqlClient = Github.GithubGraphqlClient httpClient
+        return Ok graphqlClient
+    | Error errorMessage ->
+        return Error errorMessage
+}
+
+let currentGithubUser() = task {
+    let! client = githubClient()
+    match client with
+    | Ok graphqlClient ->
+        match! graphqlClient.CurrentUserAsync() with
+        | Ok response ->
+            let user = { login = response.viewer.login }
+            return Ok user
+        | Error errorMessage ->
+            return Error $"Error while fetching current GitHub user: {errorMessage}"
+    | Error errorMessage ->
+        return Error $"Error while initializing GitHub client: {errorMessage}"
+}
+
 let toolApi = {
     getPulumiVersion = getPulumiVersion >> Async.AwaitTask
+    currentGithubUser = currentGithubUser >> Async.AwaitTask
 }
 
 let docs = Remoting.documentation "Pulumi Tool!" [ ]

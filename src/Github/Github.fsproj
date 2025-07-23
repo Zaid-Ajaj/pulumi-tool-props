@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Github.StringEnum.fs" />
+    <Compile Include="Github.Types.fs" />
+    <Compile Include="Github.CurrentUser.fs" />
+    <Compile Include="Github.GraphqlClient.fs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Update="FSharp.Core" Version="6.0.1" />
+    <PackageReference Include="Fable.Remoting.Json" Version="2.23.0" />
+  </ItemGroup>
+</Project>

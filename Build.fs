@@ -74,7 +74,7 @@ let createArtifacts() =
         artifacts
     ]
 
-    let binary = "pulumi-tool-template"
+    let binary = "pulumi-tool-props"
     for runtime in runtimes do
         printfn $"Building binary {binary} for {runtime}"
         let args = [
@@ -132,7 +132,7 @@ let createAndPublishArtifacts() =
         printfn "GITHUB_TOKEN is not set"
 
     let githubUsername = "Zaid-Ajaj"
-    let githubRepo = "pulumi-tool-template"
+    let githubRepo = "pulumi-tool-props"
     let releases = await (github.Repository.Release.GetAll(githubUsername, githubRepo))
     let alreadyReleased = releases |> Seq.exists (fun release -> releaseVersion release = version)
 
