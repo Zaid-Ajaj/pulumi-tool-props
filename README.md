@@ -1,18 +1,18 @@
-# Pulumi Tool Template
+# Pulumi Providers Operations Tool
 
-A template for building interactive pulumi tool plugins using F# end-to-end.
+A tool for managing Pulumi providers operations.
 
 ### Install via Pulumi 
 Using the Pulumi CLI (requires CLI v3.121.0 or later)
 
 ```
-pulumi plugin install tool template --server github://api.github.com/Zaid-Ajaj
+pulumi plugin install tool props --server github://api.github.com/Zaid-Ajaj
 ```
 
 After installing the plugin, you can run it using the following command:
 
 ```
-pulumi plugin run template
+pulumi plugin run props
 ```
 It will spin up a web server running at `http://localhost:5000` where you can navigate to interact with the tool.
 
