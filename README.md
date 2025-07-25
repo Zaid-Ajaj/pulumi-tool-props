@@ -21,12 +21,12 @@ It will spin up a web server running at `http://localhost:5000` where you can na
 To uninstall the plugin, you can run the following command:
 
 ```
-pulumi plugin rm tool template
+pulumi plugin rm tool props
 ```
 
 ### Update to latest version
 
-You can uninstall and reinstall the plugin to get the latest version of the template.
+You can uninstall and reinstall the plugin to get the latest version of the tool.
 
 ### Development
 
