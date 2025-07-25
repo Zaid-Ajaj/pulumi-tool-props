@@ -14,7 +14,7 @@ let PulumiTitleWithVersion() =
             Html.div "Pulumi Provider Operations"
             Html.div [
                 prop.style [ style.fontSize 13; style.marginTop 10; style.marginLeft 10 ]
-                prop.text $" using Pulumi {version} | Tool v0.2.0"
+                prop.text $" using Pulumi {version} | Tool v0.3.0"
             ]
         ]
 
@@ -143,6 +143,22 @@ let IssueDetails(issueId: string) =
             prop.className "content"
             prop.children [
                 Html.h3 issue.title
+                Html.div [
+                    Html.span "by "
+                    Html.span [
+                        Html.a [
+                            prop.text $"@{issue.author}"
+                            prop.href $"http://github.com/{issue.author}"
+                            prop.target "_blank"
+                        ]
+                    ]
+
+                    if issue.assignees.Length > 0 then
+                        Html.span " | Assignees: "
+                        issue.assignees
+                        |> String.concat ", "
+                        |> Html.span
+                ]
                 Html.hr [ ]
                 Html.div [
                     prop.dangerouslySetInnerHTML issue.bodyHTML
@@ -259,13 +275,21 @@ let TriageIssues() =
                         
                         for issue in filterIssues issues filters do
                         Html.p [
-                            prop.style [ style.fontSize 14 ]
+                            prop.style [ 
+                                style.fontSize 14 
+                                if Some issue.id = selectedIssue 
+                                then 
+                                    style.border(1, borderStyle.groove, color.blue)
+                                    style.borderRadius 3
+                            ]
                             prop.children [
                                 Html.div [
                                     prop.onClick (fun _ -> setSelectedIssue(Some issue.id))
                                     prop.style [ 
                                         style.marginRight 5
-                                        style.marginTop 10
+                                        style.marginTop 3
+                                        style.marginBottom 5
+                                        style.padding 5
                                         style.cursor.pointer 
                                     ]
         
@@ -281,7 +305,7 @@ let TriageIssues() =
                                 ]
 
                                 Html.div [
-                                    prop.style [ style.fontSize 12; style.color.gray ]
+                                    prop.style [ style.paddingLeft 10; style.paddingBottom 5; style.fontSize 12; style.color.gray ]
                                     prop.children [
                                         Html.a [
                                             prop.style [ style.marginRight 5 ]

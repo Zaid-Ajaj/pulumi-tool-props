@@ -36,6 +36,7 @@ type DetailedGithubIssue = {
     body: string
     bodyHTML: string
     comments: GithubComment list
+    author: string
 }
 
 type ToolApi = {

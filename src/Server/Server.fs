@@ -251,6 +251,10 @@ let issueDetails (issueId: string) = task {
                     id = issue.id
                     title = issue.title
                     url = issue.url
+                    author = 
+                        issue.author 
+                        |> Option.map (fun a -> a.login)
+                        |> Option.defaultValue ""
                     assignees = 
                         issue.assignees.nodes 
                         |> Option.defaultValue [] 
