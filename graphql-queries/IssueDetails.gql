@@ -1,0 +1,30 @@
+query IssueDetails($id: ID!) {
+  node (id:$id) {
+    __typename
+    ... on Issue {
+        __typename
+        title
+        id
+        url
+        body
+        bodyHTML
+        createdAt
+        assignees(first: 10) {
+          nodes {
+            login
+          }
+        }
+        comments(first: 100) {
+            nodes {
+              author { login }
+              createdAt
+              body
+              bodyHTML
+            }
+        }
+        author {
+          login
+        }
+    }
+  }
+}

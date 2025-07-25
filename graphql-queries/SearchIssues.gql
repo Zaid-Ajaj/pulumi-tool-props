@@ -1,0 +1,36 @@
+query SearchIssues($query: String!, $afterCurser: String)  {
+  search(query: $query, type: ISSUE, first: 100, after: $afterCurser) {
+    issueCount
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+    nodes {
+      __typename
+      ... on Issue {
+        __typename
+        id
+        title
+        assignees(first: 10) {
+          nodes {
+            login
+          }
+        }
+        number
+        repository {
+          name
+        }
+        url
+        createdAt
+        author {
+          login
+        }
+        labels(first:10) {
+          nodes {
+            name
+          }
+        }
+      }
+    }
+  }
+}

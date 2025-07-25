@@ -7,7 +7,9 @@
   <ItemGroup>
     <Compile Include="Github.StringEnum.fs" />
     <Compile Include="Github.Types.fs" />
+    <Compile Include="Github.SearchIssues.fs" />
     <Compile Include="Github.CurrentUser.fs" />
+    <Compile Include="Github.IssueDetails.fs" />
     <Compile Include="Github.GraphqlClient.fs" />
   </ItemGroup>
   <ItemGroup>
