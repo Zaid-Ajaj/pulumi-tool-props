@@ -10,6 +10,7 @@
     <Compile Include="Github.SearchIssues.fs" />
     <Compile Include="Github.CurrentUser.fs" />
     <Compile Include="Github.IssueDetails.fs" />
+    <Compile Include="Github.WorkflowByUrl.fs" />
     <Compile Include="Github.GraphqlClient.fs" />
   </ItemGroup>
   <ItemGroup>

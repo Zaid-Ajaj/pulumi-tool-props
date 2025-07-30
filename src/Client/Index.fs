@@ -14,7 +14,7 @@ let PulumiTitleWithVersion() =
             Html.div "Pulumi Provider Operations"
             Html.div [
                 prop.style [ style.fontSize 13; style.marginTop 10; style.marginLeft 10 ]
-                prop.text $" using Pulumi {version} | Tool v0.3.0"
+                prop.text $" using Pulumi {version} | Tool v0.4.0"
             ]
         ]
 
@@ -50,7 +50,7 @@ let Home() = Html.div [
                     ]
                 ]
 
-                Html.span "Address issues that need triage in Pulumi orginazation"
+                Html.span "Address issues that need triage in Pulumi organization"
             ]
         ]
     ]
@@ -119,6 +119,104 @@ let AgeInHours (date: System.DateTime) =
     ]
 
 [<ReactComponent>]
+let WorkflowDetails (workflowUrl: string) = 
+    let response = React.useDeferred(Server.api.workflowDetails workflowUrl, [| workflowUrl |])
+    match response with
+    | Deferred.HasNotStartedYet -> 
+        Html.none
+    
+    | Deferred.InProgress ->
+        Html.div [
+            Html.i [ prop.className "fa fa-spinner fa-spin" ]
+        ]
+
+    | Deferred.Failed error ->
+        Html.div [
+            prop.style [ style.color.red ]
+            prop.text $"Error: {error.Message}"
+        ]
+
+    | Deferred.Resolved (Error error) ->
+        Html.div [
+            prop.style [ style.color.red ]
+            prop.text $"Error: {error}"
+        ]
+
+    | Deferred.Resolved (Ok details) ->
+        Html.div [
+            Html.p $"Status: {details.status} | Conclusion: {details.conclusion}"
+            for run in details.checkRuns do
+            Html.p [
+                Html.span [
+                    prop.style [
+                        if run.conclusion <> "Success" 
+                        then style.color.red
+                        elif run.conclusion = "Skipped"
+                        then style.color.gray
+                        else style.color.green
+
+                        style.textDecoration.underline
+                        style.cursor.pointer
+                    ]
+
+                    prop.children [
+                        if run.conclusion <> "Success"  
+                        then Html.li [ prop.style [ style.marginRight 10 ]; prop.className "fa fa-times" ]
+                        else Html.li [ prop.style [ style.marginRight 5 ]; prop.className "fa fa-check" ]
+
+                        Html.span [
+                            prop.style [ style.marginRight 5 ]
+                            prop.text run.name
+                        ]
+                    ]
+                ]
+            ]
+        ]
+
+[<ReactComponent>]
+let PulumiWorkflowFailuresList(failedWorkflows: Map<string, string>) =
+    let selectedWorkflow, selectWorkflow = React.useState<(string*string) option>(None)
+    match selectedWorkflow with
+    | Some (title, url) ->
+        Html.div [
+            Html.span [
+                prop.style [ style.fontSize 12 ]
+                prop.children [
+                    Html.text $"Selected: {title}"
+                    Html.button [
+                        prop.className "button is-small"
+                        prop.style [ style.marginLeft 10; style.fontSize 10 ]
+                        prop.text "Back"
+                        prop.onClick (fun _ -> selectWorkflow None)
+                    ]
+                ]
+            ]
+
+            WorkflowDetails url
+        ]
+
+    | None ->
+        Html.div [
+            for title, url in Map.toList failedWorkflows do
+            Html.p [
+                prop.style [ 
+                    style.fontSize 12 
+                    style.cursor.pointer
+                    style.textDecoration.underline
+                    style.color "#3273dc"
+                ]
+                prop.onClick (fun _ -> selectWorkflow(Some (title, url)))
+                prop.children [
+                    Html.i [
+                        prop.className "fa fa-chevron-right"
+                        prop.style [ style.marginRight 5  ]
+                    ]
+                    Html.text title
+                ]
+            ]
+        ]
+
+[<ReactComponent>]
 let IssueDetails(issueId: string) =
     let response = React.useDeferred(Server.api.issueDetails(issueId), [| issueId |])
     match response with
@@ -160,12 +258,12 @@ let IssueDetails(issueId: string) =
                         |> Html.span
                 ]
                 Html.hr [ ]
-                Html.div [
-                    prop.dangerouslySetInnerHTML issue.bodyHTML
-                ]
+                if Map.isEmpty issue.pulumiBotWorkflowFailures then
+                    Html.div [ prop.dangerouslySetInnerHTML issue.bodyHTML ]
+                else
+                    PulumiWorkflowFailuresList issue.pulumiBotWorkflowFailures
             ]
         ]
-
 
 let filterIssues (issues: Shared.GithubIssue list) (filters: string list) =
     issues

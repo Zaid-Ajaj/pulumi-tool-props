@@ -15,6 +15,10 @@ open System.Threading.Tasks
 open Microsoft.Extensions.Logging
 open System.Net.Http
 open System.Net.Http.Headers
+open Markdig.Syntax
+open Markdig.Syntax.Inlines
+open Github
+open System.Net
 
 let capitalize (input: string) =
     match input with
@@ -98,10 +102,43 @@ let githubClient() = task {
     match tokenResult with
     | Ok token ->
         httpClient.DefaultRequestHeaders.Authorization <- new AuthenticationHeaderValue("Bearer", token)
-        let graphqlClient = Github.GithubGraphqlClient httpClient
+        let graphqlClient = GithubGraphqlClient httpClient
         return Ok graphqlClient
     | Error errorMessage ->
         return Error errorMessage
+}
+
+let logsUrlFromWorkflowUrl (workflowUrl: string) =
+    let parts =
+        workflowUrl.Split '/'
+        |> Array.filter (fun part -> not (String.IsNullOrWhiteSpace part))
+    match parts with
+    | [| _; _; owner; repo; "actions"; "runs"; runId |] ->
+        Some $"https://api.github.com/repos/%s{owner}/%s{repo}/actions/runs/%s{runId}/logs"
+    | _ ->
+        None
+
+let downloadWorkflowLogs (workflowUrl: string) = task {
+    match! acquireGithubToken() with
+    | Error errorMessage ->
+        return Error $"failed to acquire GitHub token: {errorMessage}"
+    | Ok token ->
+        let client = new HttpClient()
+        client.DefaultRequestHeaders.UserAgent.Add(ProductInfoHeaderValue("PulumiTool", "0.1.0"))
+        client.DefaultRequestHeaders.Accept.Add(MediaTypeWithQualityHeaderValue("application/vnd.github.v4+json"))
+        client.DefaultRequestHeaders.Authorization <- new AuthenticationHeaderValue("Bearer", token)
+        match logsUrlFromWorkflowUrl workflowUrl with
+        | None -> return Error "Invalid workflow URL format"
+        | Some logsUrl ->
+            let! response = client.GetAsync logsUrl
+            match response.StatusCode with
+            | HttpStatusCode.OK ->
+                let! zipFileStream = response.Content.ReadAsStreamAsync()
+                use archive = new Compression.ZipArchive(zipFileStream, Compression.ZipArchiveMode.Read)
+                let entries =  Seq.toList archive.Entries
+                return Ok entries
+            | _ ->
+                return Error $"Failed to download workflow logs: {response.ReasonPhrase}"
 }
 
 let currentGithubUser() = task {
@@ -119,15 +156,15 @@ let currentGithubUser() = task {
         return Error $"Error while initializing GitHub client: {errorMessage}"
 }
 
-let tierByRepo = function 
-| "pulumi-aws" 
+let tierByRepo = function
+| "pulumi-aws"
 | "pulumi-azure"
 | "pulumi-gcp"
 | "pulumi-kubernetes" -> Some 1
 | "pulumi-aws-native"
 | "pulumi-azure-native"
 | "pulumi-awsx"
-| "pulumi-terraform-provider" 
+| "pulumi-terraform-provider"
 | "pulumi-eks" -> Some 2
 | _ -> None
 
@@ -142,6 +179,7 @@ let excludedRepos = [
     "pulumi-hugo-private"
     "pulumi-internal"
     "customer-engineering"
+    "programhunt"
 ]
 
 let allTriageIssues (client: Github.GithubGraphqlClient) =
@@ -170,14 +208,14 @@ let allTriageIssues (client: Github.GithubGraphqlClient) =
                             title = issue.title
                             number = issue.number
                             url = issue.url
-                            repository = issue.repository.name 
-                            createdAt = issue.createdAt 
+                            repository = issue.repository.name
+                            createdAt = issue.createdAt
                             tier = tierByRepo issue.repository.name
-                            author = 
-                                issue.author 
+                            author =
+                                issue.author
                                 |> Option.map (fun a -> a.login)
                                 |> Option.defaultValue ""
-                            labels = 
+                            labels =
                                 issue.labels
                                 |> Option.map (fun labels -> labels.nodes |> Option.defaultValue [] |> List.choose (fun l -> l |> Option.map (fun label -> label.name)))
                                 |> Option.defaultValue []
@@ -186,11 +224,11 @@ let allTriageIssues (client: Github.GithubGraphqlClient) =
                                 |> Option.defaultValue []
                                 |> List.choose (fun a -> a |> Option.map (fun assignee -> assignee.login))
                         })
-    
+
             triageIssues.AddRange issues
             afterCurser <- response.search.pageInfo.endCursor
             search <- response.search.pageInfo.hasNextPage
-    
+
     if errors.Count > 0 then
         Error (List.ofSeq errors)
     else
@@ -207,12 +245,12 @@ let triageIssues() = task {
             let messages = errorMessages |> List.map (fun e -> e.message) |> String.concat ";"
             return Error $"Error(s) while fetching triage issues: {messages}"
         | Ok issues ->
-            let sorted = 
+            let sorted =
                 issues
                 |> List.groupBy (fun issue -> issue.repository)
                 |> List.sortBy (fun (repo, _) -> tierByRepo repo |> Option.defaultValue 99)
                 |> List.map (fun (repo, issues) ->
-                    let sortedIssues = 
+                    let sortedIssues =
                         issues
                         |> List.sortByDescending (fun issue -> issue.createdAt)
                     repo, sortedIssues)
@@ -220,6 +258,15 @@ let triageIssues() = task {
 
             return Ok sorted
 }
+
+let parseWorkflowUrls (issueBody: string) =
+    let ast = Markdig.Markdown.Parse(issueBody, Markdig.MarkdownPipelineBuilder().Build())
+    Map.ofList [
+        for node in ast.Descendants<LinkInline>() do
+            if node.Url.Contains "/actions/runs" then
+                for literal in Seq.truncate 1 (node.Descendants<LiteralInline>()) do
+                    yield literal.Content.ToString(), node.Url
+    ]
 
 let issueDetails (issueId: string) = task {
     let! client = githubClient()
@@ -230,7 +277,7 @@ let issueDetails (issueId: string) = task {
         match! graphqlClient.IssueDetailsAsync { id = issueId } with
         | Ok response ->
             match response.node with
-            | None -> 
+            | None ->
                 return Error $"Issue with ID {issueId} not found"
             | Some (Github.IssueDetails.Node.Issue issue) ->
                 let comments =
@@ -241,35 +288,114 @@ let issueDetails (issueId: string) = task {
                         {
                             bodyHTML = comment.bodyHTML
                             createdAt = comment.createdAt
-                            author = 
-                                comment.author 
+                            author =
+                                comment.author
                                 |> Option.map (fun a -> a.login)
                                 |> Option.defaultValue ""
                         })
-                    
+
+                let author =
+                    issue.author
+                    |> Option.map (fun a -> a.login)
+                    |> Option.defaultValue ""
+
+                let workflowUrls =
+                    if author = "pulumi-bot" && issue.title.Contains "Workflow failure" then
+                        parseWorkflowUrls issue.body
+                    else
+                        Map.empty
+
                 let detailedIssue : DetailedGithubIssue = {
                     id = issue.id
                     title = issue.title
                     url = issue.url
-                    author = 
-                        issue.author 
+                    author =
+                        issue.author
                         |> Option.map (fun a -> a.login)
                         |> Option.defaultValue ""
-                    assignees = 
-                        issue.assignees.nodes 
-                        |> Option.defaultValue [] 
+                    assignees =
+                        issue.assignees.nodes
+                        |> Option.defaultValue []
                         |> List.choose (fun a -> a |> Option.map (fun assignee -> assignee.login))
                     createdAt = issue.createdAt
                     body = issue.body
                     bodyHTML = issue.bodyHTML
                     comments = comments
+                    pulumiBotWorkflowFailures = workflowUrls
                 }
+
                 return Ok detailedIssue
-            | Some _ -> 
+            | Some _ ->
                 return Error "Unexpected node type returned from GitHub API"
         | Error errorMessages ->
             let messages = errorMessages |> List.map (fun e -> e.message) |> String.concat "; "
             return Error $"Error(s) while fetching issue details: {messages}"
+}
+
+let workflowDetails (workflowUrl: string) = task {
+    let! client = githubClient()
+    match client with
+    | Error errorMessage ->
+        return Error $"Error while initializing GitHub client: {errorMessage}"
+    | Ok graphqlClient ->
+        match! graphqlClient.WorkflowByUrlAsync { url = workflowUrl } with
+        | Ok response ->
+            match response.resource with
+            | None ->
+                return Error $"Workflow run not found for URL {workflowUrl}"
+            | Some (WorkflowByUrl.UniformResourceLocatable.WorkflowRun workflowRun) ->
+                let checkRuns =
+                    workflowRun.checkSuite.checkRuns
+                    |> Option.bind (fun cr ->
+                        cr.nodes
+                        |> Option.map (List.choose id)
+                    )
+                    |> Option.defaultValue []
+                    |> List.map (fun checkRun ->
+                        {
+                            id = checkRun.id
+                            name = checkRun.name
+                            status = checkRun.status.ToString()
+                            conclusion =
+                                checkRun.conclusion
+                                |> Option.map (fun c -> c.ToString())
+                                |> Option.defaultValue ""
+                            steps =
+                                checkRun.steps
+                                |> Option.bind (fun steps ->
+                                    steps.nodes
+                                    |> Option.map (List.choose id)
+                                )
+                                |> Option.defaultValue []
+                                |> List.map (fun step ->
+                                    {
+                                        startedAt = step.startedAt
+                                        completedAt = step.completedAt
+                                        name = step.name
+                                        status = step.status.ToString()
+                                        conclusion =
+                                            step.conclusion
+                                            |> Option.map (fun c -> c.ToString())
+                                            |> Option.defaultValue ""
+                                        number = step.number
+                                    })
+                        })
+
+                let workflowDetails : GithubWorkflowDetails = {
+                    id = workflowRun.id
+                    status = workflowRun.checkSuite.status.ToString()
+                    checkRuns = checkRuns
+                    conclusion = workflowRun.checkSuite.conclusion
+                        |> Option.map (fun c -> c.ToString())
+                        |> Option.defaultValue ""
+                }
+
+                return Ok workflowDetails
+            | Some _ ->
+                return Error "Unexpected resource type returned from GitHub API"
+        | Error errorMessages ->
+            let messages = errorMessages |> List.map (fun e -> e.message) |> String.concat "; "
+            return Error $"Error(s) while fetching workflow details: {messages}"
 }
 
 let toolApi = {
@@ -277,6 +403,7 @@ let toolApi = {
     currentGithubUser = currentGithubUser >> Async.AwaitTask
     triageIssues = triageIssues >> Async.AwaitTask
     issueDetails = issueDetails >> Async.AwaitTask
+    workflowDetails = workflowDetails >> Async.AwaitTask
 }
 
 let docs = Remoting.documentation "Pulumi Tool" [ ]

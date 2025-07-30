@@ -37,6 +37,37 @@ type DetailedGithubIssue = {
     bodyHTML: string
     comments: GithubComment list
     author: string
+    pulumiBotWorkflowFailures: Map<string, string>
+}
+
+type GithubCheckStep = {
+    /// Identifies the date and time when the check step was started.
+    startedAt: Option<System.DateTime>
+    /// Identifies the date and time when the check step was completed.
+    completedAt: Option<System.DateTime>
+    /// The step's name.
+    name: string
+    /// The current status of the check step.
+    status: string
+    /// The conclusion of the check step.
+    conclusion: string
+    /// The index of the step in the list of steps of the parent check run.
+    number: int
+}
+
+type GithubCheckRun = {
+    id: string
+    name: string
+    status: string
+    conclusion: string
+    steps : GithubCheckStep list
+}
+
+type GithubWorkflowDetails = {
+    id: string
+    status: string
+    conclusion: string
+    checkRuns: GithubCheckRun list
 }
 
 type ToolApi = {
@@ -44,4 +75,5 @@ type ToolApi = {
     currentGithubUser : unit -> Async<Result<GithubUser, string>>
     triageIssues : unit -> Async<Result<GithubIssue list, string>>
     issueDetails : string -> Async<Result<DetailedGithubIssue, string>>
+    workflowDetails : string -> Async<Result<GithubWorkflowDetails, string>>
 }

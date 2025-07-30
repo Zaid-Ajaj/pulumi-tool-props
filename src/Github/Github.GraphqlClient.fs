@@ -232,3 +232,73 @@ type GithubGraphqlClient private (httpClient: HttpClient, url: string) =
         }
 
     member this.IssueDetails(input: IssueDetails.InputVariables) = Async.RunSynchronously(this.IssueDetailsAsync input)
+
+
+    member _.WorkflowByUrlAsync(input: WorkflowByUrl.InputVariables) =
+        async {
+            let query = """
+                # example { "url": "https://github.com/pulumi/pulumi-awsx/actions/runs/16127691569" }
+                query WorkflowByUrl ($url: URI!) {
+                  resource(url: $url) {
+                    __typename
+                    ... on WorkflowRun {
+                      __typename
+                      id
+                      checkSuite {
+                        conclusion
+                        status
+                        checkRuns(first: 100) {
+                          nodes {
+                            name
+                            conclusion
+                            status
+                            detailsUrl
+                            id
+                            steps(first:100) {
+                              nodes {
+                                startedAt
+                                completedAt
+                                name
+                                status
+                                conclusion
+                                number
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+            """
+            
+            let inputJson = JsonConvert.SerializeObject({ query = query; variables = Some input }, settings)
+            let! response =
+                httpClient.PostAsync(url, new StringContent(inputJson, Encoding.UTF8, "application/json"))
+                |> Async.AwaitTask
+
+            let! responseContent = Async.AwaitTask(response.Content.ReadAsStreamAsync())
+            use sr = new StreamReader(responseContent)
+            use tr = new JsonTextReader(sr)
+            let responseJson = serializer.Deserialize<JObject>(tr)
+
+            match response.IsSuccessStatusCode with
+            | true ->
+                let errorsReturned =
+                    responseJson.ContainsKey "errors"
+                    && responseJson.["errors"].Type = JTokenType.Array
+                    && responseJson.["errors"].HasValues
+
+                if errorsReturned then
+                    let response = responseJson.ToObject<GraphqlErrorResponse>(serializer)
+                    return Error response.errors
+                else
+                    let response = responseJson.ToObject<GraphqlSuccessResponse<WorkflowByUrl.Query>>(serializer)
+                    return Ok response.data
+
+            | errorStatus ->
+                let response = responseJson.ToObject<GraphqlErrorResponse>(serializer)
+                return Error response.errors
+        }
+
+    member this.WorkflowByUrl(input: WorkflowByUrl.InputVariables) = Async.RunSynchronously(this.WorkflowByUrlAsync input)

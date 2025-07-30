@@ -1,0 +1,33 @@
+# example { "url": "https://github.com/pulumi/pulumi-awsx/actions/runs/16127691569" }
+query WorkflowByUrl ($url: URI!) {
+  resource(url: $url) {
+    __typename
+    ... on WorkflowRun {
+      __typename
+      id
+      checkSuite {
+        conclusion
+        status
+        checkRuns(first: 100) {
+          nodes {
+            name
+            conclusion
+            status
+            detailsUrl
+            id
+            steps(first:100) {
+              nodes {
+                startedAt
+                completedAt
+                name
+                status
+                conclusion
+                number
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
