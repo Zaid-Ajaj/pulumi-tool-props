@@ -14,7 +14,7 @@ let PulumiTitleWithVersion() =
             Html.div "Pulumi Provider Operations"
             Html.div [
                 prop.style [ style.fontSize 13; style.marginTop 10; style.marginLeft 10 ]
-                prop.text $" using Pulumi {version} | Tool v0.5.0"
+                prop.text $" using Pulumi {version} | Tool v0.6.0"
             ]
         ]
 
@@ -119,8 +119,7 @@ let AgeInHours (date: System.DateTime) =
     ]
 
 [<ReactComponent>]
-let WorkflowLogAnalysis(run: GithubCheckRun, content: string) =
-    let response = React.useDeferred(Server.api.analyzeWorkflowLogs { content = content; run = run }, [| content; run |])
+let WorkflowLogAnalysis(response: Deferred<Result<string,string>>) =
     match response with
     | Deferred.HasNotStartedYet ->
         Html.none
@@ -149,6 +148,7 @@ let WorkflowLogAnalysis(run: GithubCheckRun, content: string) =
 [<ReactComponent>]
 let CheckRunContents(run: GithubCheckRun, content: string) = 
     let currentTab, setCurrentTab = React.useState "steps"
+    let workflowAnalysis = React.useDeferred(Server.api.analyzeWorkflowLogs { content = content; run = run }, [| content; run |])
     Html.div [
         Html.div [
             prop.className "tabs is-small"
@@ -160,7 +160,7 @@ let CheckRunContents(run: GithubCheckRun, content: string) =
                         if currentTab = "steps" then prop.className "is-active"
                     ]
                     Html.li [
-                        prop.children [ Html.a [ Html.span "Logs" ]]
+                        prop.children [ Html.a [ Html.span "Raw Logs" ]]
                         prop.onClick (fun _ -> setCurrentTab "logs")
                         if currentTab = "logs" then prop.className "is-active"
                     ]
@@ -168,6 +168,11 @@ let CheckRunContents(run: GithubCheckRun, content: string) =
                         prop.children [ Html.a [ Html.span "AI analysis" ]]
                         prop.onClick (fun _ -> setCurrentTab "ai-analysis")
                         if currentTab = "ai-analysis" then prop.className "is-active"
+                    ]
+                    Html.li [
+                        prop.children [ Html.a [ Html.span "Quick Actions" ]]
+                        prop.onClick (fun _ -> setCurrentTab "actions")
+                        if currentTab = "actions" then prop.className "is-active"
                     ]
                 ]
             ]
@@ -200,7 +205,10 @@ let CheckRunContents(run: GithubCheckRun, content: string) =
             ]
 
         | "ai-analysis" ->
-            WorkflowLogAnalysis(run, content)
+            WorkflowLogAnalysis workflowAnalysis
+
+        | "actions" ->
+            Html.p "Quick actions"
 
         | _ -> 
             Html.none
@@ -511,6 +519,8 @@ let TriageIssues() =
                                         List.distinct (current @ [ "tier2" ])))
                             ]
                         ]
+
+                        Html.div [ prop.style [ style.marginTop 10 ] ]
 
                         for issue in filterIssues issues filters do
                         Html.p [

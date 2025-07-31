@@ -7,7 +7,6 @@ open System.IO
 open System.IO.Compression
 open Fable.Remoting.Server
 open Fable.Remoting.Giraffe
-open Newtonsoft.Json
 open Saturn
 open CliWrap
 open CliWrap.Buffered
@@ -24,6 +23,8 @@ open System.Net
 open System.Text
 open OpenAI
 open OpenAI.Chat
+open Foundatio
+open Foundatio.Caching
 
 let capitalize (input: string) =
     match input with
@@ -191,42 +192,8 @@ let logsUrlFromWorkflowUrl (workflowUrl: string) =
     | _ ->
         None
 
-let splitLogFileContents (content: string) (run: GithubCheckRun) =
-    let lines = content.Split '\n'
-    let stepsByName = Dictionary<string, StringBuilder>()
-    for step in run.steps do
-        stepsByName[step.name] <- StringBuilder()
-
-    for line in lines do
-        let timestamp, rest =
-            if line.Length >= 28 then
-                DateTimeOffset.Parse(line.Substring(0, 27), CultureInfo.InvariantCulture), line.Substring(28).Trim()
-            else
-                DateTimeOffset.MinValue, line.Trim()
-
-        for step in run.steps do
-            match step.startedAt, step.completedAt with
-            | Some startedAt, Some completedAt ->
-                let start = startedAt.DateTime
-                let finish = completedAt.DateTime
-                if timestamp.DateTime >= start && timestamp.DateTime <= finish then
-                    let stepName = step.name
-                    if stepsByName.ContainsKey stepName then
-                        stepsByName[stepName].AppendLine rest |> ignore
-            | _ -> ()
-
-    let steps =
-        run.steps
-        |> List.map (fun step ->
-            let stepName = step.name
-            let content =
-                if stepsByName.ContainsKey stepName then
-                    stepsByName[stepName].ToString().Trim()
-                else
-                    ""
-            { step with content = content })
-
-    { run with steps = steps }
+// cache to save workflow analysis results from OpenAI to avoid repeated calls within 15m
+let workflowAnalysisCache : ICacheClient = new InMemoryCacheClient()
 
 let openAiClient() =
     let apiKey = Environment.GetEnvironmentVariable "OPENAI_API_KEY"
@@ -237,6 +204,11 @@ let openAiClient() =
         Ok (client.GetChatClient "gpt-4o")
 
 let analyzeWorkflowLogs (input: AnalyzeWorkflowLogsInput) = task {
+    let! analysisExists = workflowAnalysisCache.ExistsAsync input.run.id
+    if analysisExists then
+        let! cachedResult = workflowAnalysisCache.GetAsync<string> input.run.id
+        return Ok cachedResult.Value
+    else
     match openAiClient() with
     | Error errorMessage ->
         return Error errorMessage
@@ -245,7 +217,7 @@ let analyzeWorkflowLogs (input: AnalyzeWorkflowLogsInput) = task {
         You are an AI assistant that analyzes GitHub Actions workflow run logs for Pulumi. 
         Your task is to identify errors, warnings, and issues in the logs and provide a summary
         of findings, emphasizing the most critical points and focus on the following:
-        - Errors and warnings in the logs
+        - Errors and warnings in the logs. Prioritize the errors first, then warnings.
         - Any failed tests and their error details
         """
         
@@ -276,24 +248,25 @@ let analyzeWorkflowLogs (input: AnalyzeWorkflowLogsInput) = task {
         try
             let! response = chatClient.CompleteChatAsync(messages, options)
             if response.Value.Content.Count > 0 then
-                return Ok response.Value.Content[0].Text
+                let analysis = response.Value.Content[0].Text
+                let! _ = workflowAnalysisCache.SetAsync(input.run.id, analysis, TimeSpan.FromMinutes 15.0)
+                return Ok analysis
             else
                 return Error "No relevant information found in workflow logs"
         with
         | ex ->
             return Error $"Failed to analyze workflow logs using OpenAI API: {ex.Message}"
-
 }
 
 let cleanTimestamps (logContent: string) : string = 
     let builder = StringBuilder()
     for line in logContent.Split '\n' do
         if line.Length >= 28 then
-            let rest = line.Substring(28).Trim()
+            let rest = line.Substring(28)
             builder.AppendLine rest |> ignore
         else
             builder.AppendLine line |> ignore
-    builder.ToString().Trim()
+    builder.ToString()
 
 let downloadWorkflowLogs (input: DownloadWorkflowLogsInput) = task {
     match! acquireGithubToken() with
