@@ -1,6 +1,6 @@
 # Pulumi Providers Operations Tool
 
-A tool for managing Pulumi providers operations.
+A tool for managing Pulumi providers operations. Used `gh` CLI to acquire the GITHUB_TOKEN needed to interact with the GitHub API via GraphQL. Optionally uses `OPENAI_API_KEY` to enable AI features.
 
 ### Install via Pulumi 
 Using the Pulumi CLI (requires CLI v3.121.0 or later)

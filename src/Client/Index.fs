@@ -14,7 +14,7 @@ let PulumiTitleWithVersion() =
             Html.div "Pulumi Provider Operations"
             Html.div [
                 prop.style [ style.fontSize 13; style.marginTop 10; style.marginLeft 10 ]
-                prop.text $" using Pulumi {version} | Tool v0.4.0"
+                prop.text $" using Pulumi {version} | Tool v0.5.0"
             ]
         ]
 
@@ -119,6 +119,94 @@ let AgeInHours (date: System.DateTime) =
     ]
 
 [<ReactComponent>]
+let WorkflowLogAnalysis(run: GithubCheckRun, content: string) =
+    let response = React.useDeferred(Server.api.analyzeWorkflowLogs { content = content; run = run }, [| content; run |])
+    match response with
+    | Deferred.HasNotStartedYet ->
+        Html.none
+
+    | Deferred.InProgress ->
+        Html.progress [
+            prop.className "progress is-small is-primary"
+            prop.max 100
+        ]
+
+    | Deferred.Failed error ->
+        Html.div [
+            prop.style [ style.color.red ]
+            prop.text $"Error: {error.Message}"
+        ]
+
+    | Deferred.Resolved (Error error) ->
+        Html.div [
+            prop.style [ style.color.red ]
+            prop.text $"Error: {error}"
+        ]
+
+    | Deferred.Resolved (Ok analysis) -> 
+        MarkdownContent analysis
+
+[<ReactComponent>]
+let CheckRunContents(run: GithubCheckRun, content: string) = 
+    let currentTab, setCurrentTab = React.useState "steps"
+    Html.div [
+        Html.div [
+            prop.className "tabs is-small"
+            prop.children [
+                Html.ul [
+                    Html.li [
+                        prop.children [ Html.a [ Html.span "Check Steps" ]]
+                        prop.onClick (fun _ -> setCurrentTab "steps")
+                        if currentTab = "steps" then prop.className "is-active"
+                    ]
+                    Html.li [
+                        prop.children [ Html.a [ Html.span "Logs" ]]
+                        prop.onClick (fun _ -> setCurrentTab "logs")
+                        if currentTab = "logs" then prop.className "is-active"
+                    ]
+                    Html.li [
+                        prop.children [ Html.a [ Html.span "AI analysis" ]]
+                        prop.onClick (fun _ -> setCurrentTab "ai-analysis")
+                        if currentTab = "ai-analysis" then prop.className "is-active"
+                    ]
+                ]
+            ]
+        ]
+        match currentTab with
+        | "steps" -> 
+            Html.ul [
+                for step in run.steps do
+                Html.li [
+                    prop.text step.name
+                    prop.style [
+                        style.fontSize 14
+                        style.fontWeight.bold
+                        if step.conclusion = "Skipped" then style.color.gray
+                        elif step.conclusion <> "Success" then style.color.red
+                        else style.color.green
+                    ]
+                ]
+            ]
+
+        | "logs" -> 
+            Html.div [
+                prop.className "content"
+                prop.children [
+                    Html.pre [
+                        prop.style [ style.fontSize 12; style.maxHeight 600; style.overflowY.auto ]
+                        prop.text content
+                    ]
+                ]
+            ]
+
+        | "ai-analysis" ->
+            WorkflowLogAnalysis(run, content)
+
+        | _ -> 
+            Html.none
+    ]
+
+[<ReactComponent>]
 let CheckRunDetails(run: GithubCheckRun, workflowUrl: string) =
     let response = React.useDeferred(Server.api.downloadWorkflowLogs { workflowUrl = workflowUrl; run = run.name }, [| workflowUrl; run.name |])
     match response with
@@ -144,18 +232,9 @@ let CheckRunDetails(run: GithubCheckRun, workflowUrl: string) =
         ]
 
     | Deferred.Resolved (Ok content) ->
-        Html.ul [
-            for step in run.steps do
-            Html.li [
-                prop.text step.name
-                prop.style [
-                    style.fontSize 14
-                    style.fontWeight.bold
-                    if step.conclusion = "Skipped" then style.color.gray
-                    elif step.conclusion <> "Success" then style.color.red
-                    else style.color.green
-                ]
-            ]
+        Html.div [
+            prop.style [ style.marginTop -150 ]
+            prop.children [ CheckRunContents(run, content) ]
         ]
 
 [<ReactComponent>]
@@ -167,8 +246,9 @@ let WorkflowDetails (workflowUrl: string) =
         Html.none
 
     | Deferred.InProgress ->
-        Html.div [
-            Html.i [ prop.className "fa fa-spinner fa-spin" ]
+        Html.progress [
+            prop.className "progress is-small is-primary"
+            prop.max 100
         ]
 
     | Deferred.Failed error ->
@@ -319,7 +399,6 @@ let IssueDetails(issueId: string) =
                         |> String.concat ", "
                         |> Html.span
                 ]
-                Html.hr [ ]
                 if Map.isEmpty issue.pulumiBotWorkflowFailures then
                     Html.div [ prop.dangerouslySetInnerHTML issue.bodyHTML ]
                 else

@@ -22,6 +22,8 @@ open Markdig.Syntax.Inlines
 open Github
 open System.Net
 open System.Text
+open OpenAI
+open OpenAI.Chat
 
 let capitalize (input: string) =
     match input with
@@ -63,11 +65,11 @@ let pulumiCliBinary() : Task<string> = task {
     | error ->
         // when pulumi is not installed, try to get the version of of the dev build
         // installed on the system using `make install` in the pulumi repo
-        let homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
-        let pulumiPath = System.IO.Path.Combine(homeDir, ".pulumi-dev", "bin", "pulumi")
-        if System.IO.File.Exists pulumiPath then
+        let homeDir = Environment.GetFolderPath Environment.SpecialFolder.UserProfile
+        let pulumiPath = Path.Combine(homeDir, ".pulumi-dev", "bin", "pulumi")
+        if File.Exists pulumiPath then
             return pulumiPath
-        elif System.IO.File.Exists $"{pulumiPath}.exe" then
+        elif File.Exists $"{pulumiPath}.exe" then
             return $"{pulumiPath}.exe"
         else
             return "pulumi"
@@ -226,6 +228,73 @@ let splitLogFileContents (content: string) (run: GithubCheckRun) =
 
     { run with steps = steps }
 
+let openAiClient() =
+    let apiKey = Environment.GetEnvironmentVariable "OPENAI_API_KEY"
+    if String.IsNullOrWhiteSpace apiKey then
+        Error "Environment variable OPENAI_API_KEY is not set which is required for AI features"
+    else
+        let client = OpenAIClient apiKey
+        Ok (client.GetChatClient "gpt-4o")
+
+let analyzeWorkflowLogs (input: AnalyzeWorkflowLogsInput) = task {
+    match openAiClient() with
+    | Error errorMessage ->
+        return Error errorMessage
+    | Ok chatClient ->
+        let systemMessage = """
+        You are an AI assistant that analyzes GitHub Actions workflow run logs for Pulumi. 
+        Your task is to identify errors, warnings, and issues in the logs and provide a summary
+        of findings, emphasizing the most critical points and focus on the following:
+        - Errors and warnings in the logs
+        - Any failed tests and their error details
+        """
+        
+        let steps = 
+            input.run.steps
+            |> List.map (fun step ->
+                $"- {step.name} (status: {step.status}, conclusion: {step.conclusion}):")
+            |> String.concat "\n"
+
+        let stepsMessage = $"""
+        The workflow run has the following steps:
+        {steps}
+        """
+
+        let userMessage = $"""
+        Here are the logs for the workflow run:
+        {input.content}
+        """
+
+        let messages = ResizeArray<ChatMessage> [
+            SystemChatMessage systemMessage :> ChatMessage
+            SystemChatMessage stepsMessage :> ChatMessage
+            UserChatMessage userMessage :> ChatMessage
+        ]
+
+        let options = ChatCompletionOptions(Temperature=0.0f)
+
+        try
+            let! response = chatClient.CompleteChatAsync(messages, options)
+            if response.Value.Content.Count > 0 then
+                return Ok response.Value.Content[0].Text
+            else
+                return Error "No relevant information found in workflow logs"
+        with
+        | ex ->
+            return Error $"Failed to analyze workflow logs using OpenAI API: {ex.Message}"
+
+}
+
+let cleanTimestamps (logContent: string) : string = 
+    let builder = StringBuilder()
+    for line in logContent.Split '\n' do
+        if line.Length >= 28 then
+            let rest = line.Substring(28).Trim()
+            builder.AppendLine rest |> ignore
+        else
+            builder.AppendLine line |> ignore
+    builder.ToString().Trim()
+
 let downloadWorkflowLogs (input: DownloadWorkflowLogsInput) = task {
     match! acquireGithubToken() with
     | Error errorMessage ->
@@ -254,7 +323,8 @@ let downloadWorkflowLogs (input: DownloadWorkflowLogsInput) = task {
                     use entryStream = entry.Open()
                     use reader = new StreamReader(entryStream)
                     let! content = reader.ReadToEndAsync()
-                    return Ok content
+                    let cleanedContent = cleanTimestamps content
+                    return Ok cleanedContent
                 | None ->
                     return Error "log file was not found in the log archive of the workflow run"
             | _ ->
@@ -452,7 +522,6 @@ let issueDetails (issueId: string) = task {
             return Error $"Error(s) while fetching issue details: {messages}"
 }
 
-
 let toolApi = {
     getPulumiVersion = getPulumiVersion >> Async.AwaitTask
     currentGithubUser = currentGithubUser >> Async.AwaitTask
@@ -460,6 +529,7 @@ let toolApi = {
     issueDetails = issueDetails >> Async.AwaitTask
     workflowDetails = workflowDetails >> Async.AwaitTask
     downloadWorkflowLogs = downloadWorkflowLogs >> Async.AwaitTask
+    analyzeWorkflowLogs = analyzeWorkflowLogs >> Async.AwaitTask
 }
 
 let docs = Remoting.documentation "Pulumi Tool" [ ]

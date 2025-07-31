@@ -77,6 +77,11 @@ type DownloadWorkflowLogsInput = {
     run: string
 }
 
+type AnalyzeWorkflowLogsInput = {
+    content: string
+    run: GithubCheckRun
+}
+
 type ToolApi = {
     getPulumiVersion : unit -> Async<string>
     currentGithubUser : unit -> Async<Result<GithubUser, string>>
@@ -84,4 +89,5 @@ type ToolApi = {
     issueDetails : string -> Async<Result<DetailedGithubIssue, string>>
     workflowDetails : string -> Async<Result<GithubWorkflowDetails, string>>
     downloadWorkflowLogs : DownloadWorkflowLogsInput -> Async<Result<string, string>>
+    analyzeWorkflowLogs : AnalyzeWorkflowLogsInput -> Async<Result<string, string>>
 }
