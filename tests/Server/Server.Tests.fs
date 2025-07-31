@@ -26,15 +26,15 @@ let all = testList "All" [
         let logsUrl = logsUrlFromWorkflowUrl workflowUrl
         Expect.equal logsUrl (Some "https://api.github.com/repos/pulumi/automation-api-examples/actions/runs/16526722537/logs") "Expected the correct logs URL to be found"
 
-    //testCaseAsync "downloadWorkflowLogs returns Ok with entries" <| async {
-    //    let workflowUrl = "https://github.com/pulumi/automation-api-examples/actions/runs/16526722537"
-    //    let! result = Async.AwaitTask (downloadWorkflowLogs workflowUrl)
-    //    match result with
-    //    | Ok entries ->
-    //        Expect.equal (List.length entries) 1 "Expected one log entry to be found"
-    //    | Error errorMessage ->
-    //        failwith $"Failed to download workflow logs: {errorMessage}"
-    //}
+    // testCaseAsync "downloadWorkflowLogs returns Ok with entries" <| async {
+    //     let workflowUrl = "https://github.com/pulumi/automation-api-examples/actions/runs/16526722537"
+    //     let! result = Async.AwaitTask (downloadWorkflowLogs (workflowUrl, 0))
+    //     match result with
+    //     | Ok content ->
+    //         Expect.isNotEmpty content "Expected log content to be found"
+    //     | Error errorMessage ->
+    //         failwith $"Failed to download workflow logs: {errorMessage}"
+    // }
 ]
 
 [<EntryPoint>]

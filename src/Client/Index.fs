@@ -57,11 +57,11 @@ let Home() = Html.div [
 ]
 
 [<ReactComponent>]
-let CurrentGithubUser() = 
+let CurrentGithubUser() =
     let response = React.useDeferred(Server.api.currentGithubUser(), [|  |])
     let fontSize = 14
     match response with
-    | Deferred.HasNotStartedYet -> 
+    | Deferred.HasNotStartedYet ->
         Html.span "..."
     | Deferred.Resolved (Ok user) ->
         Html.span [
@@ -89,23 +89,23 @@ let CurrentGithubUser() =
 
 [<ReactComponent>]
 let IssueLabel(label: string) =
-    let (bg, fg) = 
+    let (bg, fg) =
         match label with
         | "needs-triage" -> "green", "white"
         | "p0" | "p1" -> "red", "white"
-        | "tier 1" 
+        | "tier 1"
         | "tier 2" -> "orange", "black"
         | _ -> "lightblue", "black"
     Html.span [
         prop.text label
-        prop.style [ 
+        prop.style [
             style.fontSize 9
             style.fontWeight.bold
             style.marginRight 5
             style.backgroundColor bg
             style.borderRadius 3
             style.color fg
-            style.padding 3 
+            style.padding 3
         ]
     ]
 
@@ -119,12 +119,53 @@ let AgeInHours (date: System.DateTime) =
     ]
 
 [<ReactComponent>]
-let WorkflowDetails (workflowUrl: string) = 
-    let response = React.useDeferred(Server.api.workflowDetails workflowUrl, [| workflowUrl |])
+let CheckRunDetails(run: GithubCheckRun, workflowUrl: string) =
+    let response = React.useDeferred(Server.api.downloadWorkflowLogs { workflowUrl = workflowUrl; run = run.name }, [| workflowUrl; run.name |])
     match response with
-    | Deferred.HasNotStartedYet -> 
+    | Deferred.HasNotStartedYet ->
         Html.none
-    
+
+    | Deferred.InProgress ->
+        Html.progress [
+            prop.className "progress is-small is-primary"
+            prop.max 100
+        ]
+
+    | Deferred.Failed error ->
+        Html.div [
+            prop.style [ style.color.red ]
+            prop.text $"Error: {error.Message}"
+        ]
+
+    | Deferred.Resolved (Error error) ->
+        Html.div [
+            prop.style [ style.color.red ]
+            prop.text $"Error: {error}"
+        ]
+
+    | Deferred.Resolved (Ok content) ->
+        Html.ul [
+            for step in run.steps do
+            Html.li [
+                prop.text step.name
+                prop.style [
+                    style.fontSize 14
+                    style.fontWeight.bold
+                    if step.conclusion = "Skipped" then style.color.gray
+                    elif step.conclusion <> "Success" then style.color.red
+                    else style.color.green
+                ]
+            ]
+        ]
+
+[<ReactComponent>]
+let WorkflowDetails (workflowUrl: string) =
+    let response = React.useDeferred(Server.api.workflowDetails workflowUrl, [| workflowUrl |])
+    let selectedRun, setSelectedRun = React.useState<string option>(None)
+    match response with
+    | Deferred.HasNotStartedYet ->
+        Html.none
+
     | Deferred.InProgress ->
         Html.div [
             Html.i [ prop.className "fa fa-spinner fa-spin" ]
@@ -144,30 +185,51 @@ let WorkflowDetails (workflowUrl: string) =
 
     | Deferred.Resolved (Ok details) ->
         Html.div [
-            Html.p $"Status: {details.status} | Conclusion: {details.conclusion}"
-            for run in details.checkRuns do
-            Html.p [
-                Html.span [
-                    prop.style [
-                        if run.conclusion <> "Success" 
-                        then style.color.red
-                        elif run.conclusion = "Skipped"
-                        then style.color.gray
-                        else style.color.green
-
-                        style.textDecoration.underline
-                        style.cursor.pointer
-                    ]
-
+            prop.className "columns"
+            prop.children [
+                Html.div [
+                    prop.className "column"
+                    prop.style [ style.width 300; style.maxWidth 300 ]
                     prop.children [
-                        if run.conclusion <> "Success"  
-                        then Html.li [ prop.style [ style.marginRight 10 ]; prop.className "fa fa-times" ]
-                        else Html.li [ prop.style [ style.marginRight 5 ]; prop.className "fa fa-check" ]
+                        for run in details.checkRuns do
+                        Html.p [
+                            Html.span [
+                                prop.onClick (fun _ -> setSelectedRun(Some run.name))
+                                prop.style [
+                                    if run.conclusion <> "Success"
+                                    then style.color.red
+                                    elif run.conclusion = "Skipped"
+                                    then style.color.gray
+                                    else style.color.green
 
-                        Html.span [
-                            prop.style [ style.marginRight 5 ]
-                            prop.text run.name
+                                    style.textDecoration.underline
+                                    style.cursor.pointer
+                                ]
+
+                                prop.children [
+                                    if run.conclusion <> "Success"
+                                    then Html.li [ prop.style [ style.marginRight 10 ]; prop.className "fa fa-times" ]
+                                    else Html.li [ prop.style [ style.marginRight 5 ]; prop.className "fa fa-check" ]
+
+                                    Html.span [
+                                        prop.style [ style.marginRight 5 ]
+                                        prop.text run.name
+                                    ]
+                                ]
+                            ]
                         ]
+                    ]
+                ]
+                Html.div [
+                    prop.className "column"
+                    prop.children [
+                        match selectedRun with
+                        | None ->
+                            Html.div "Select a run to see details"
+                        | Some runName ->
+                            match details.checkRuns |> List.tryFind (fun r -> r.name = runName) with
+                            | None -> Html.div "Run not found"
+                            | Some run -> CheckRunDetails(run, workflowUrl)
                     ]
                 ]
             ]
@@ -199,8 +261,8 @@ let PulumiWorkflowFailuresList(failedWorkflows: Map<string, string>) =
         Html.div [
             for title, url in Map.toList failedWorkflows do
             Html.p [
-                prop.style [ 
-                    style.fontSize 12 
+                prop.style [
+                    style.fontSize 12
                     style.cursor.pointer
                     style.textDecoration.underline
                     style.color "#3273dc"
@@ -220,7 +282,7 @@ let PulumiWorkflowFailuresList(failedWorkflows: Map<string, string>) =
 let IssueDetails(issueId: string) =
     let response = React.useDeferred(Server.api.issueDetails(issueId), [| issueId |])
     match response with
-    | Deferred.HasNotStartedYet -> 
+    | Deferred.HasNotStartedYet ->
         Html.none
     | Deferred.InProgress ->
         Html.i [
@@ -275,12 +337,12 @@ let filterIssues (issues: Shared.GithubIssue list) (filters: string list) =
     )
 
 [<ReactComponent>]
-let TriageIssues() = 
+let TriageIssues() =
     let response = React.useDeferred(Server.api.triageIssues(), [|  |])
     let (filters, setFilters) = React.useStateWithUpdater<string list> [ ]
     let (selectedIssue, setSelectedIssue) = React.useState<string option>(None)
     match response with
-    | Deferred.HasNotStartedYet -> 
+    | Deferred.HasNotStartedYet ->
         Html.none
 
     | Deferred.InProgress ->
@@ -293,7 +355,7 @@ let TriageIssues() =
             prop.style [ style.color.red ]
             prop.text $"Error: {error.Message}"
         ]
-    
+
     | Deferred.Resolved (Error error) ->
         Html.div [
             prop.style [ style.color.red ]
@@ -312,7 +374,7 @@ let TriageIssues() =
                         Html.span [
                             Html.button [
                                 prop.text "All"
-                                prop.classes [ 
+                                prop.classes [
                                     "button"
                                     "is-small"
                                     if filters = [ ]
@@ -324,14 +386,14 @@ let TriageIssues() =
 
                             Html.button [
                                 prop.text "P0/P1"
-                                prop.classes [ 
+                                prop.classes [
                                     "button"
                                     "is-small"
-                                    if List.contains "p0/p1" filters 
+                                    if List.contains "p0/p1" filters
                                     then "is-primary"
                                 ]
                                 prop.style [ style.marginRight 5 ]
-                                prop.onClick (fun _ -> setFilters(fun current -> 
+                                prop.onClick (fun _ -> setFilters(fun current ->
                                     if List.contains "p0/p1" current then
                                         List.filter (fun f -> f <> "p0/p1") current
                                     else
@@ -340,14 +402,14 @@ let TriageIssues() =
 
                             Html.button [
                                 prop.text "Tier 1"
-                                prop.classes [ 
+                                prop.classes [
                                     "button"
                                     "is-small"
-                                    if List.contains "tier1" filters 
+                                    if List.contains "tier1" filters
                                     then "is-primary"
                                 ]
                                 prop.style [ style.marginRight 5 ]
-                                prop.onClick (fun _ -> setFilters(fun current -> 
+                                prop.onClick (fun _ -> setFilters(fun current ->
                                     if List.contains "tier1" current then
                                         List.filter (fun f -> f <> "tier1") current
                                     else
@@ -356,41 +418,41 @@ let TriageIssues() =
 
                             Html.button [
                                 prop.text "Tier 2"
-                                prop.classes [ 
+                                prop.classes [
                                     "button"
                                     "is-small"
-                                    if List.contains "tier2" filters 
+                                    if List.contains "tier2" filters
                                     then "is-primary"
                                 ]
                                 prop.style [ style.marginRight 5 ]
-                                prop.onClick (fun _ -> setFilters(fun current -> 
+                                prop.onClick (fun _ -> setFilters(fun current ->
                                     if List.contains "tier2" current then
                                         List.filter (fun f -> f <> "tier2") current
                                     else
                                         List.distinct (current @ [ "tier2" ])))
                             ]
                         ]
-                        
+
                         for issue in filterIssues issues filters do
                         Html.p [
-                            prop.style [ 
-                                style.fontSize 14 
-                                if Some issue.id = selectedIssue 
-                                then 
+                            prop.style [
+                                style.fontSize 14
+                                if Some issue.id = selectedIssue
+                                then
                                     style.border(1, borderStyle.groove, color.blue)
                                     style.borderRadius 3
                             ]
                             prop.children [
                                 Html.div [
                                     prop.onClick (fun _ -> setSelectedIssue(Some issue.id))
-                                    prop.style [ 
+                                    prop.style [
                                         style.marginRight 5
                                         style.marginTop 3
                                         style.marginBottom 5
                                         style.padding 5
-                                        style.cursor.pointer 
+                                        style.cursor.pointer
                                     ]
-        
+
                                     prop.children [
                                         Html.i [
                                             prop.className "fa fa-chevron-right"
@@ -425,7 +487,7 @@ let TriageIssues() =
                                                 prop.target "_blank"
                                                 prop.text $"@{issue.author}"
                                             ]
-                                        ]                                        
+                                        ]
                                     ]
                                 ]
                             ]
@@ -489,9 +551,9 @@ let View() =
                 router.onUrlChanged setCurrentUrl
                 router.children [
                    match currentUrl with
-                    | [ "triage" ] -> 
+                    | [ "triage" ] ->
                         GithubTriagePage()
-                    | _ -> 
+                    | _ ->
                         Home()
                ]
             ]

@@ -2,7 +2,9 @@ module Server
 
 open System
 open System.Collections.Generic
+open System.Globalization
 open System.IO
+open System.IO.Compression
 open Fable.Remoting.Server
 open Fable.Remoting.Giraffe
 open Newtonsoft.Json
@@ -19,6 +21,7 @@ open Markdig.Syntax
 open Markdig.Syntax.Inlines
 open Github
 open System.Net
+open System.Text
 
 let capitalize (input: string) =
     match input with
@@ -108,6 +111,74 @@ let githubClient() = task {
         return Error errorMessage
 }
 
+let workflowDetails (workflowUrl: string) = task {
+    let! client = githubClient()
+    match client with
+    | Error errorMessage ->
+        return Error $"Error while initializing GitHub client: {errorMessage}"
+    | Ok graphqlClient ->
+        match! graphqlClient.WorkflowByUrlAsync { url = workflowUrl } with
+        | Ok response ->
+            match response.resource with
+            | None ->
+                return Error $"Workflow run not found for URL {workflowUrl}"
+            | Some (WorkflowByUrl.UniformResourceLocatable.WorkflowRun workflowRun) ->
+                let checkRuns =
+                    workflowRun.checkSuite.checkRuns
+                    |> Option.bind (fun cr ->
+                        cr.nodes
+                        |> Option.map (List.choose id)
+                    )
+                    |> Option.defaultValue []
+                    |> List.map (fun checkRun ->
+                        {
+                            id = checkRun.id
+                            name = checkRun.name
+                            status = checkRun.status.ToString()
+                            conclusion =
+                                checkRun.conclusion
+                                |> Option.map (fun c -> c.ToString())
+                                |> Option.defaultValue ""
+                            steps =
+                                checkRun.steps
+                                |> Option.bind (fun steps ->
+                                    steps.nodes
+                                    |> Option.map (List.choose id)
+                                )
+                                |> Option.defaultValue []
+                                |> List.map (fun step ->
+                                    {
+                                        startedAt = step.startedAt
+                                        completedAt = step.completedAt
+                                        name = step.name
+                                        status = step.status.ToString()
+                                        content = ""
+                                        conclusion =
+                                            step.conclusion
+                                            |> Option.map (fun c -> c.ToString())
+                                            |> Option.defaultValue ""
+                                        number = step.number
+                                    })
+                        })
+
+                let workflowDetails : GithubWorkflowDetails = {
+                    id = workflowRun.id
+                    status = workflowRun.checkSuite.status.ToString()
+                    checkRuns = checkRuns
+                    conclusion = workflowRun.checkSuite.conclusion
+                        |> Option.map (fun c -> c.ToString())
+                        |> Option.defaultValue ""
+                }
+
+                return Ok workflowDetails
+            | Some _ ->
+                return Error "Unexpected resource type returned from GitHub API"
+        | Error errorMessages ->
+            let messages = errorMessages |> List.map (fun e -> e.message) |> String.concat "; "
+            return Error $"Error(s) while fetching workflow details: {messages}"
+}
+
+
 let logsUrlFromWorkflowUrl (workflowUrl: string) =
     let parts =
         workflowUrl.Split '/'
@@ -118,7 +189,44 @@ let logsUrlFromWorkflowUrl (workflowUrl: string) =
     | _ ->
         None
 
-let downloadWorkflowLogs (workflowUrl: string) = task {
+let splitLogFileContents (content: string) (run: GithubCheckRun) =
+    let lines = content.Split '\n'
+    let stepsByName = Dictionary<string, StringBuilder>()
+    for step in run.steps do
+        stepsByName[step.name] <- StringBuilder()
+
+    for line in lines do
+        let timestamp, rest =
+            if line.Length >= 28 then
+                DateTimeOffset.Parse(line.Substring(0, 27), CultureInfo.InvariantCulture), line.Substring(28).Trim()
+            else
+                DateTimeOffset.MinValue, line.Trim()
+
+        for step in run.steps do
+            match step.startedAt, step.completedAt with
+            | Some startedAt, Some completedAt ->
+                let start = startedAt.DateTime
+                let finish = completedAt.DateTime
+                if timestamp.DateTime >= start && timestamp.DateTime <= finish then
+                    let stepName = step.name
+                    if stepsByName.ContainsKey stepName then
+                        stepsByName[stepName].AppendLine rest |> ignore
+            | _ -> ()
+
+    let steps =
+        run.steps
+        |> List.map (fun step ->
+            let stepName = step.name
+            let content =
+                if stepsByName.ContainsKey stepName then
+                    stepsByName[stepName].ToString().Trim()
+                else
+                    ""
+            { step with content = content })
+
+    { run with steps = steps }
+
+let downloadWorkflowLogs (input: DownloadWorkflowLogsInput) = task {
     match! acquireGithubToken() with
     | Error errorMessage ->
         return Error $"failed to acquire GitHub token: {errorMessage}"
@@ -127,16 +235,28 @@ let downloadWorkflowLogs (workflowUrl: string) = task {
         client.DefaultRequestHeaders.UserAgent.Add(ProductInfoHeaderValue("PulumiTool", "0.1.0"))
         client.DefaultRequestHeaders.Accept.Add(MediaTypeWithQualityHeaderValue("application/vnd.github.v4+json"))
         client.DefaultRequestHeaders.Authorization <- new AuthenticationHeaderValue("Bearer", token)
-        match logsUrlFromWorkflowUrl workflowUrl with
+        match logsUrlFromWorkflowUrl input.workflowUrl with
         | None -> return Error "Invalid workflow URL format"
         | Some logsUrl ->
             let! response = client.GetAsync logsUrl
             match response.StatusCode with
             | HttpStatusCode.OK ->
                 let! zipFileStream = response.Content.ReadAsStreamAsync()
-                use archive = new Compression.ZipArchive(zipFileStream, Compression.ZipArchiveMode.Read)
-                let entries =  Seq.toList archive.Entries
-                return Ok entries
+                use archive = new ZipArchive(zipFileStream, ZipArchiveMode.Read)
+                let logFile =
+                    archive.Entries
+                    |> Seq.tryFind (fun entry ->
+                        let entryName = entry.Name.Replace("/", "_").Replace("-", "_")
+                        entryName.Contains (input.run.Replace("/", "_").Replace("-", "_")))
+
+                match logFile with
+                | Some entry ->
+                    use entryStream = entry.Open()
+                    use reader = new StreamReader(entryStream)
+                    let! content = reader.ReadToEndAsync()
+                    return Ok content
+                | None ->
+                    return Error "log file was not found in the log archive of the workflow run"
             | _ ->
                 return Error $"Failed to download workflow logs: {response.ReasonPhrase}"
 }
@@ -259,7 +379,7 @@ let triageIssues() = task {
             return Ok sorted
 }
 
-let parseWorkflowUrls (issueBody: string) =
+let parseWorkflowUrls (issueBody: string) : Map<string, string> =
     let ast = Markdig.Markdown.Parse(issueBody, Markdig.MarkdownPipelineBuilder().Build())
     Map.ofList [
         for node in ast.Descendants<LinkInline>() do
@@ -332,71 +452,6 @@ let issueDetails (issueId: string) = task {
             return Error $"Error(s) while fetching issue details: {messages}"
 }
 
-let workflowDetails (workflowUrl: string) = task {
-    let! client = githubClient()
-    match client with
-    | Error errorMessage ->
-        return Error $"Error while initializing GitHub client: {errorMessage}"
-    | Ok graphqlClient ->
-        match! graphqlClient.WorkflowByUrlAsync { url = workflowUrl } with
-        | Ok response ->
-            match response.resource with
-            | None ->
-                return Error $"Workflow run not found for URL {workflowUrl}"
-            | Some (WorkflowByUrl.UniformResourceLocatable.WorkflowRun workflowRun) ->
-                let checkRuns =
-                    workflowRun.checkSuite.checkRuns
-                    |> Option.bind (fun cr ->
-                        cr.nodes
-                        |> Option.map (List.choose id)
-                    )
-                    |> Option.defaultValue []
-                    |> List.map (fun checkRun ->
-                        {
-                            id = checkRun.id
-                            name = checkRun.name
-                            status = checkRun.status.ToString()
-                            conclusion =
-                                checkRun.conclusion
-                                |> Option.map (fun c -> c.ToString())
-                                |> Option.defaultValue ""
-                            steps =
-                                checkRun.steps
-                                |> Option.bind (fun steps ->
-                                    steps.nodes
-                                    |> Option.map (List.choose id)
-                                )
-                                |> Option.defaultValue []
-                                |> List.map (fun step ->
-                                    {
-                                        startedAt = step.startedAt
-                                        completedAt = step.completedAt
-                                        name = step.name
-                                        status = step.status.ToString()
-                                        conclusion =
-                                            step.conclusion
-                                            |> Option.map (fun c -> c.ToString())
-                                            |> Option.defaultValue ""
-                                        number = step.number
-                                    })
-                        })
-
-                let workflowDetails : GithubWorkflowDetails = {
-                    id = workflowRun.id
-                    status = workflowRun.checkSuite.status.ToString()
-                    checkRuns = checkRuns
-                    conclusion = workflowRun.checkSuite.conclusion
-                        |> Option.map (fun c -> c.ToString())
-                        |> Option.defaultValue ""
-                }
-
-                return Ok workflowDetails
-            | Some _ ->
-                return Error "Unexpected resource type returned from GitHub API"
-        | Error errorMessages ->
-            let messages = errorMessages |> List.map (fun e -> e.message) |> String.concat "; "
-            return Error $"Error(s) while fetching workflow details: {messages}"
-}
 
 let toolApi = {
     getPulumiVersion = getPulumiVersion >> Async.AwaitTask
@@ -404,6 +459,7 @@ let toolApi = {
     triageIssues = triageIssues >> Async.AwaitTask
     issueDetails = issueDetails >> Async.AwaitTask
     workflowDetails = workflowDetails >> Async.AwaitTask
+    downloadWorkflowLogs = downloadWorkflowLogs >> Async.AwaitTask
 }
 
 let docs = Remoting.documentation "Pulumi Tool" [ ]

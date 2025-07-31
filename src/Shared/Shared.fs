@@ -42,9 +42,9 @@ type DetailedGithubIssue = {
 
 type GithubCheckStep = {
     /// Identifies the date and time when the check step was started.
-    startedAt: Option<System.DateTime>
+    startedAt: Option<System.DateTimeOffset>
     /// Identifies the date and time when the check step was completed.
-    completedAt: Option<System.DateTime>
+    completedAt: Option<System.DateTimeOffset>
     /// The step's name.
     name: string
     /// The current status of the check step.
@@ -53,6 +53,7 @@ type GithubCheckStep = {
     conclusion: string
     /// The index of the step in the list of steps of the parent check run.
     number: int
+    content: string
 }
 
 type GithubCheckRun = {
@@ -70,10 +71,17 @@ type GithubWorkflowDetails = {
     checkRuns: GithubCheckRun list
 }
 
+type DownloadWorkflowLogsInput = {
+    workflowUrl: string
+    /// the name of the run
+    run: string
+}
+
 type ToolApi = {
     getPulumiVersion : unit -> Async<string>
     currentGithubUser : unit -> Async<Result<GithubUser, string>>
     triageIssues : unit -> Async<Result<GithubIssue list, string>>
     issueDetails : string -> Async<Result<DetailedGithubIssue, string>>
     workflowDetails : string -> Async<Result<GithubWorkflowDetails, string>>
+    downloadWorkflowLogs : DownloadWorkflowLogsInput -> Async<Result<string, string>>
 }

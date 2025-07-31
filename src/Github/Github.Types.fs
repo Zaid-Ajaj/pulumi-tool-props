@@ -4182,11 +4182,11 @@ type CreateCheckRunInput =
         /// The current status.
         status: Option<RequestableCheckStatusState>
         /// The time that the check run began.
-        startedAt: Option<System.DateTime>
+        startedAt: Option<System.DateTimeOffset>
         /// The final conclusion of the check.
         conclusion: Option<CheckConclusionState>
         /// The time that the check run finished.
-        completedAt: Option<System.DateTime>
+        completedAt: Option<System.DateTimeOffset>
         /// Descriptive details about the run.
         output: Option<CheckRunOutput>
         /// Possible further actions the integrator can perform, which a user may trigger.
@@ -6931,11 +6931,11 @@ type UpdateCheckRunInput =
         /// The current status.
         status: Option<RequestableCheckStatusState>
         /// The time that the check run began.
-        startedAt: Option<System.DateTime>
+        startedAt: Option<System.DateTimeOffset>
         /// The final conclusion of the check.
         conclusion: Option<CheckConclusionState>
         /// The time that the check run finished.
-        completedAt: Option<System.DateTime>
+        completedAt: Option<System.DateTimeOffset>
         /// Descriptive details about the run.
         output: Option<CheckRunOutput>
         /// Possible further actions the integrator can perform, which a user may trigger.

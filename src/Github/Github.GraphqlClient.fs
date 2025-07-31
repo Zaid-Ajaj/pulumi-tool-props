@@ -51,7 +51,7 @@ type GithubGraphqlClient private (httpClient: HttpClient, url: string) =
         else
             raise(ArgumentNullException("BaseAddress of the HttpClient cannot be null for the constructor that only accepts a HttpClient"))
             GithubGraphqlClient(String.Empty, httpClient)
-    
+
     member _.SearchIssuesAsync(input: SearchIssues.InputVariables) =
         async {
             let query = """
@@ -92,7 +92,7 @@ type GithubGraphqlClient private (httpClient: HttpClient, url: string) =
                   }
                 }
             """
-            
+
             let inputJson = JsonConvert.SerializeObject({ query = query; variables = Some input }, settings)
             let! response =
                 httpClient.PostAsync(url, new StringContent(inputJson, Encoding.UTF8, "application/json"))
@@ -134,7 +134,7 @@ type GithubGraphqlClient private (httpClient: HttpClient, url: string) =
                   }
                 }
             """
-            
+
             let inputJson = JsonConvert.SerializeObject({ query = query; variables = None }, settings)
             let! response =
                 httpClient.PostAsync(url, new StringContent(inputJson, Encoding.UTF8, "application/json"))
@@ -201,7 +201,7 @@ type GithubGraphqlClient private (httpClient: HttpClient, url: string) =
                   }
                 }
             """
-            
+
             let inputJson = JsonConvert.SerializeObject({ query = query; variables = Some input }, settings)
             let! response =
                 httpClient.PostAsync(url, new StringContent(inputJson, Encoding.UTF8, "application/json"))
@@ -271,19 +271,19 @@ type GithubGraphqlClient private (httpClient: HttpClient, url: string) =
                   }
                 }
             """
-            
+
             let inputJson = JsonConvert.SerializeObject({ query = query; variables = Some input }, settings)
             let! response =
                 httpClient.PostAsync(url, new StringContent(inputJson, Encoding.UTF8, "application/json"))
                 |> Async.AwaitTask
 
-            let! responseContent = Async.AwaitTask(response.Content.ReadAsStreamAsync())
-            use sr = new StreamReader(responseContent)
-            use tr = new JsonTextReader(sr)
-            let responseJson = serializer.Deserialize<JObject>(tr)
-
             match response.IsSuccessStatusCode with
             | true ->
+                let! responseContent = Async.AwaitTask(response.Content.ReadAsStreamAsync())
+                use sr = new StreamReader(responseContent)
+                use tr = new JsonTextReader(sr)
+                let responseJson = serializer.Deserialize<JObject>(tr)
+
                 let errorsReturned =
                     responseJson.ContainsKey "errors"
                     && responseJson.["errors"].Type = JTokenType.Array
@@ -297,6 +297,10 @@ type GithubGraphqlClient private (httpClient: HttpClient, url: string) =
                     return Ok response.data
 
             | errorStatus ->
+                let! responseContent = Async.AwaitTask(response.Content.ReadAsStreamAsync())
+                use sr = new StreamReader(responseContent)
+                use tr = new JsonTextReader(sr)
+                let responseJson = serializer.Deserialize<JObject>(tr)
                 let response = responseJson.ToObject<GraphqlErrorResponse>(serializer)
                 return Error response.errors
         }

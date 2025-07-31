@@ -175,9 +175,9 @@ type WorkflowRunFile =
 type CheckStep =
     {
         /// Identifies the date and time when the check step was started.
-        startedAt: Option<System.DateTime>
+        startedAt: Option<System.DateTimeOffset>
         /// Identifies the date and time when the check step was completed.
-        completedAt: Option<System.DateTime>
+        completedAt: Option<System.DateTimeOffset>
         /// The step's name.
         name: string
         /// The current status of the check step.
